@@ -67,22 +67,17 @@ contract SpinWheel is VRFConsumerBaseV2, Ownable {
     }
 
     function setTokenRewards(uint256[3] memory newRewards) external onlyOwner {
-      tokenRewards = newRewards;
+        tokenRewards = newRewards;
     }
 
     function setChances(uint16[] memory newChances) external onlyOwner {
-      for(uint8 i = 1; i < newChances.length; i++){
-        require(newChances[i] > newChances[i-1],"Invalid chance");
-        chances[i] = newChances[i];
-      }
+        for (uint8 i = 1; i < newChances.length; i++) {
+            require(newChances[i] > newChances[i - 1], "Invalid chance");
+            chances[i] = newChances[i];
+        }
     }
 
     function spinWheel() external {
-        require(
-            block.timestamp >= users[msg.sender].lastCalled + 24 hours,
-            "Time limit not expired"
-        );
-
         if (users[msg.sender].lastOutcome == Outcomes.OneMoreSpin) {
             if (users[msg.sender].count >= 4) {
                 require(
@@ -91,6 +86,10 @@ contract SpinWheel is VRFConsumerBaseV2, Ownable {
                 );
             }
         } else {
+            require(
+                block.timestamp >= users[msg.sender].lastCalled + 24 hours,
+                "Time limit not expired"
+            );
             users[msg.sender].count = 0;
         }
 
