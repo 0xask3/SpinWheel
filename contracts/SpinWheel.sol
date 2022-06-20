@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: MIT
-// An example of a consumer contract that relies on a subscription for funding.
 pragma solidity ^0.8.7;
 
-import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
-import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/interfaces/IERC20.sol";
 
-contract SpinWheel is VRFConsumerBaseV2, Ownable {
+contract SpinWheel is Ownable {
     enum Outcomes {
         BetterLuckNextTime,
         OneMoreSpin,
@@ -22,32 +19,17 @@ contract SpinWheel is VRFConsumerBaseV2, Ownable {
         Outcomes lastOutcome; //Last won price
     }
 
-    VRFCoordinatorV2Interface internal immutable COORDINATOR;
-    uint64 internal s_subscriptionId;
-    address internal constant vrfCoordinator =
-        0x6A2AAd07396B36Fe02a22b33cf443582f682c82f;
-    bytes32 internal constant keyHash =
-        0xd4bb89654db74673a187bd804519e65e3f71a52bc55f11da7601a13dcf505314;
-    uint32 callbackGasLimit = 1000000;
-    uint8 requestConfirmations = 3;
-    uint8 numWords = 1;
-
     uint256 public lastRandom;
     uint16[] public chances; //Percentage for each wins
     IERC20 private token; //Price token
     uint256[3] public tokenRewards; //Reward for each win
 
-    mapping(uint256 => address) internal requestToUser;
     mapping(address => User) public users;
 
     event WheelSpin(address userAdd, uint8 outcome, uint256 lastRandom);
 
-    constructor(uint64 subscriptionId, address _token)
-        VRFConsumerBaseV2(vrfCoordinator)
-    {
-        COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
+    constructor(address _token) {
         token = IERC20(_token);
-        s_subscriptionId = subscriptionId;
 
         /*Chance work like this : 
         If random num is between 0-400, better luck next time
@@ -78,42 +60,45 @@ contract SpinWheel is VRFConsumerBaseV2, Ownable {
     }
 
     function spinWheel() external {
-        if (users[msg.sender].lastOutcome == Outcomes.OneMoreSpin) {
-            if (users[msg.sender].count >= 4) {
+        User storage user = users[msg.sender];
+
+        if (user.lastOutcome == Outcomes.OneMoreSpin) {
+            if (user.count >= 4) {
                 require(
-                    block.timestamp >= users[msg.sender].lastCalled + 48 hours,
+                    block.timestamp >= user.lastCalled + 48 hours,
                     "Bad luck for you :)"
                 );
+
+                user.count = 0;
             }
         } else {
             require(
-                block.timestamp >= users[msg.sender].lastCalled + 24 hours,
+                block.timestamp >= user.lastCalled + 24 hours,
                 "Time limit not expired"
             );
-            users[msg.sender].count = 0;
+            user.count = 0;
         }
 
-        uint256 requestId = COORDINATOR.requestRandomWords(
-            keyHash,
-            s_subscriptionId,
-            requestConfirmations,
-            callbackGasLimit,
-            numWords
+        uint256 seed = uint256(
+            keccak256(
+                abi.encodePacked(
+                    block.timestamp +
+                        block.difficulty +
+                        ((
+                            uint256(keccak256(abi.encodePacked(block.coinbase)))
+                        ) / (block.timestamp)) +
+                        block.gaslimit +
+                        ((uint256(keccak256(abi.encodePacked(msg.sender)))) /
+                            (block.timestamp)) +
+                        block.number
+                )
+            )
         );
 
-        requestToUser[requestId] = msg.sender;
-    }
-
-    function fulfillRandomWords(uint256 requestId, uint256[] memory randomWords)
-        internal
-        override
-    {
-        lastRandom = randomWords[0] % 1000; //0-999
-        address userAddress = requestToUser[requestId];
-        User storage user = users[userAddress];
+        lastRandom = seed % 1000;
+        handleOutcome(msg.sender);
 
         user.lastCalled = block.timestamp;
-        handleOutcome(userAddress);
     }
 
     function handleOutcome(address userAdd) internal {
